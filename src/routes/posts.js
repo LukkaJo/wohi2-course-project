@@ -1,104 +1,119 @@
 const express = require("express");
 const router = express.Router();
-
-const posts = require("../data/posts");
+const prisma = require("../lib/prisma");
 
 // GET /posts 
 // List all posts
-router.get("/", (req, res) => {
+
+function formatPost(post) {
+  return {
+    ...post,
+    date: post.date.toISOString().split("T")[0],
+    keywords: post.keywords.map((k) => k.name),
+  };
+}
+
+router.get("/", async (req, res) => {
   const { keyword } = req.query;
 
-  if (!keyword) {
-    return res.json(posts);
-  }
+  const where = keyword
+    ? { keywords: { some: { name: keyword } } }
+    : {};
 
-  const filteredPosts = posts.filter(post =>
-    post.question.toLowerCase().includes(keyword.toLowerCase())
-  );
+  const posts = await prisma.post.findMany({
+    where,
+    include: { keywords: true },
+    orderBy: { id: "asc" },
+  });
 
-  res.json(filteredPosts);
+  res.json(posts.map(formatPost));
 });
 
-router.get("/:postId", (req, res) => {
+router.get("/:postId", async (req, res) => {
+  const postId = Number(req.params.postId);
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { keywords: true },
+  });
+
+  if (!post) {
+    return res.status(404).json({message: "Post not found"});
+  }
+
+  res.json(formatPost(post));
+});
+
+
+router.post("/", async (req, res) => {
+  const { title, date, content, keywords } = req.body;
+
+  if (!title || !date || !content) {
+    return res.status(400).json({ msg:"title, date and content are mandatory" });
+  }
+
+  const keywordsArray = Array.isArray(keywords) ? keywords : [];
+
+  const newPost = await prisma.post.create({
+    data: {
+      title, date: new Date(date), content,
+      keywords: {
+        connectOrCreate: keywordsArray.map((kw) => ({
+          where: { name: kw }, create: { name: kw },
+        })), },
+    },
+    include: { keywords: true },
+  });
+
+  res.status(201).json(formatPost(newPost));
+});
+
+router.put("/:postId", async (req, res) => {
+  const postId = Number(req.params.postId);
+  const { title, date, content, keywords } = req.body;
+  const existingPost = await prisma.post.findUnique({ where: { id: postId } });
+  if (!existingPost) {
+    return res.status(404).json({ message: "Post not found" });
+  }
+
+  if (!title || !date || !content) {
+    return res.status(400).json({ msg: "title, date and content are mandatory" });
+  }
+
+  const keywordsArray = Array.isArray(keywords) ? keywords : [];
+  const updatedPost = await prisma.post.update({
+    where: { id: postId },
+    data: {
+      title, date: new Date(date), content,
+      keywords: {
+        set: [],
+        connectOrCreate: keywordsArray.map((kw) => ({
+          where: { name: kw },
+          create: { name: kw },
+        })),
+      },
+    },
+    include: { keywords: true },
+  });
+  res.json(formatPost(updatedPost));
+});
+
+router.delete("/:postId", async (req, res) => {
   const postId = Number(req.params.postId);
 
-  const post = posts.find((p) => p.id === postId);
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { keywords: true },
+  });
 
   if (!post) {
     return res.status(404).json({ message: "Post not found" });
   }
 
-  res.json(post);
-});
-
-router.post("/", (req, res) => {
-  const newPost = {
-    id: posts.length + 1,
-    question: req.body.question,
-    answer: req.body.answer
-  };
-
-  posts.push(newPost);
-  res.status(201).json(newPost);
-});
-
-router.post("/", (req, res) => {
-  const { question, answer } = req.body;
-
-  if (!question || !answer) {
-    return res.status(400).json({
-      message: "question and answer are required"
-    });
-  }
-
-  const maxId = Math.max(...posts.map(p => p.id), 0);
-
-  const newPost = {
-    id: maxId + 1,
-    question,
-    answer
-  };
-
-  posts.push(newPost);
-  res.status(201).json(newPost);
-});
-
-router.put("/:postId", (req, res) => {
-  const postId = Number(req.params.postId);
-  const { question, answer } = req.body;
-
-  const post = posts.find((p) => p.id === postId);
-
-  if (!post) {
-    return res.status(404).json({ message: "Post not found" });
-  }
-
-  if (!question || !answer) {
-    return res.status(400).json({
-      message: "question and answer are required"
-    });
-  }
-
-  post.question = question;
-  post.answer = answer;
-
-  res.json(post);
-});
-
-router.delete("/:postId", (req, res) => {
-  const postId = Number(req.params.postId);
-  
-  const postIndex = posts.findIndex((p) => p.id === postId);
-
-  if (postIndex === -1) {
-    return res.status(404).json({ message: "Post not found" });
-  }
-
-  const deletedPost = posts.splice(postIndex, 1);
+  await prisma.post.delete({ where: { id: postId } });
 
   res.json({
     message: "Post deleted successfully",
-    post: deletedPost[0]
+    post: formatPost(post),
   });
 });
 
