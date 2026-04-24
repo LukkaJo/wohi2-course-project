@@ -4,6 +4,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const postsRouter = require("./routes/posts");
+const authRouter = require("./routes/auth");
 const prisma = require("./lib/prisma");
 
 
@@ -11,6 +12,7 @@ const prisma = require("./lib/prisma");
 app.use(express.json());
 
 // everything under /api/posts
+app.use("/api/auth", authRouter);
 app.use("/api/posts", postsRouter);
 
 app.use((req, res) => {

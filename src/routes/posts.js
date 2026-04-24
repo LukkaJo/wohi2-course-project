@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const prisma = require("../lib/prisma");
+const authenticate = require("../middleware/auth");
+const isOwner = require("../middleware/isOwner");
 
-// GET /posts 
-// List all posts
+router.use(authenticate); 
 
 function formatPost(post) {
   return {
@@ -37,29 +38,33 @@ router.get("/:postId", async (req, res) => {
   });
 
   if (!post) {
-    return res.status(404).json({message: "Post not found"});
+    return res.status(404).json({ message: "Post not found" });
   }
 
   res.json(formatPost(post));
 });
 
-
 router.post("/", async (req, res) => {
   const { title, date, content, keywords } = req.body;
 
   if (!title || !date || !content) {
-    return res.status(400).json({ msg:"title, date and content are mandatory" });
+    return res.status(400).json({ msg: "title, date and content are mandatory" });
   }
 
   const keywordsArray = Array.isArray(keywords) ? keywords : [];
 
   const newPost = await prisma.post.create({
     data: {
-      title, date: new Date(date), content,
+      title,
+      date: new Date(date),
+      content,
+      userId: req.user.userId,
       keywords: {
         connectOrCreate: keywordsArray.map((kw) => ({
-          where: { name: kw }, create: { name: kw },
-        })), },
+          where: { name: kw },
+          create: { name: kw },
+        })),
+      },
     },
     include: { keywords: true },
   });
@@ -67,9 +72,10 @@ router.post("/", async (req, res) => {
   res.status(201).json(formatPost(newPost));
 });
 
-router.put("/:postId", async (req, res) => {
+router.put("/:postId", isOwner, async (req, res) => {
   const postId = Number(req.params.postId);
   const { title, date, content, keywords } = req.body;
+
   const existingPost = await prisma.post.findUnique({ where: { id: postId } });
   if (!existingPost) {
     return res.status(404).json({ message: "Post not found" });
@@ -83,7 +89,10 @@ router.put("/:postId", async (req, res) => {
   const updatedPost = await prisma.post.update({
     where: { id: postId },
     data: {
-      title, date: new Date(date), content,
+      title,
+      date: new Date(date),
+      content,
+      userId: req.user.userId,
       keywords: {
         set: [],
         connectOrCreate: keywordsArray.map((kw) => ({
@@ -97,7 +106,7 @@ router.put("/:postId", async (req, res) => {
   res.json(formatPost(updatedPost));
 });
 
-router.delete("/:postId", async (req, res) => {
+router.delete("/:postId",isOwner, async (req, res) => {
   const postId = Number(req.params.postId);
 
   const post = await prisma.post.findUnique({

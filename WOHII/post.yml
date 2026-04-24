@@ -1,0 +1,26 @@
+info:
+  name: post
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: http://localhost:3000/api/posts
+  body:
+    type: json
+    data: |-
+      {
+        "title": "Test post",
+        "date": "2026-04-24",
+        "content": "This post has been made by bruno",
+        "keywords": ["bruno", "test", "node"]
+      }
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTc3NzA0ODU3MSwiZXhwIjoxNzc3MDUyMTcxfQ.RV0Uvzc-1hzZqwHCcr2lmx5forfpUQoPSaxdpXGJRqc
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
