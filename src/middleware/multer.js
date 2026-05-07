@@ -3,7 +3,7 @@ const path = require("path");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "..", "public", "uploads"));
+    cb(null, path.join(__dirname, "..", "..", "public", "uploads"));
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -11,12 +11,9 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage: storage });
-
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    // Tarkistetaan onko tiedosto kuva
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
@@ -24,7 +21,7 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB maksimikoko
+    fileSize: 5 * 1024 * 1024,
   },
 });
 

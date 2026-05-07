@@ -1,0 +1,19 @@
+info:
+  name: GetPost
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: http://localhost:3000/api/posts
+  headers:
+    - name: Authorization
+      value: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTc3ODE3MTk4MCwiZXhwIjoxNzc4MTc1NTgwfQ.ECCtx6w3HiwpO4W23TehYcCAwXU2KYDHBXjVaS-Vazc
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​

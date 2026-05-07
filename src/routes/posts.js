@@ -8,6 +8,7 @@ const multer = require("multer");
 
 router.use(authenticate); 
 
+
 function parseKeywords(keywords) {
   if (Array.isArray(keywords)) return keywords;
   if (typeof keywords === "string") {
@@ -16,17 +17,19 @@ function parseKeywords(keywords) {
   return [];
 }
 
-function formatPost(post) {
+// currentUserId parametri tarvitaan "solved"-kenttää varten
+function formatPost(post, currentUserId = null) {
   return {
     ...post,
+    question: post.title,       // frontti käyttää q.question
+    answer: post.content,       // frontti käyttää q.answer
     date: post.date.toISOString().split("T")[0],
     keywords: post.keywords.map((k) => k.name),
-    userName: post.user?.name || null, 
-    likeCount: post._count?.likes || 0,
-    isLiked: post.likes?.length > 0,
+    userName: post.user?.name || null,
     user: undefined,
-    likes: undefined,
-    _count: undefined,
+    solved: post.attempts?.some(
+      (a) => a.userId === currentUserId && a.correct
+    ) ?? false,
   };
 }
 
@@ -44,8 +47,7 @@ router.get("/", async (req, res) => {
         include: { 
           keywords: true, 
           user: true,
-          likes: { where: { userId: req.user.userId }, take: 1 },
-          _count: { select: { likes: true } }
+          attempts: true,       // tarvitaan solved-kenttää varten
         }, 
         orderBy: { id: "asc" }, 
         skip,
@@ -55,7 +57,7 @@ router.get("/", async (req, res) => {
   ]);
 
   res.json({
-    data: filteredPosts.map(formatPost),
+    data: filteredPosts.map((p) => formatPost(p, req.user.userId)),
     page,
     limit,
     total,
@@ -70,8 +72,7 @@ router.get("/:postId", async (req, res) => {
     include: { 
       keywords: true, 
       user: true,
-      likes: { where: { userId: req.user.userId }, take: 1 },
-      _count: { select: { likes: true } }
+      attempts: true,           // tarvitaan solved-kenttää varten
     },
   });
 
@@ -79,14 +80,14 @@ router.get("/:postId", async (req, res) => {
     return res.status(404).json({ message: "Post not found" });
   }
 
-  res.json(formatPost(post));
+  res.json(formatPost(post, req.user.userId));
 });
 
 router.post("/", upload.single("image"), async (req, res) => {
-  const { title, date, content, keywords } = req.body;
+  const {question, answer, keywords} = req.body;
   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null; 
 
-  if (!title || !date || !content) {
+  if (!question || !answer) {
     return res.status(400).json({ msg: "title, date and content are mandatory" });
   }
 
@@ -94,9 +95,9 @@ router.post("/", upload.single("image"), async (req, res) => {
 
   const newPost = await prisma.post.create({
     data: {
-      title,
-      date: new Date(date),
-      content,
+      title: question,
+      date: new Date(),
+      content: answer,
       imageUrl,
       userId: req.user.userId,
       keywords: {
@@ -106,10 +107,10 @@ router.post("/", upload.single("image"), async (req, res) => {
         })),
       },
     },
-    include: { keywords: true },
+    include: { keywords: true, attempts: true },
   });
 
-  res.status(201).json(formatPost(newPost));
+  res.status(201).json(formatPost(newPost, req.user.userId));
 });
 
 router.put("/:postId", isOwner, upload.single("image"), async (req, res) => {
@@ -148,9 +149,9 @@ router.put("/:postId", isOwner, upload.single("image"), async (req, res) => {
         })),
       },
     },
-    include: { keywords: true },
+    include: { keywords: true, attempts: true },
   });
-  res.json(formatPost(updatedPost));
+  res.json(formatPost(updatedPost, req.user.userId));
 });
 
 router.delete("/:postId", isOwner, async (req, res) => {
@@ -158,7 +159,7 @@ router.delete("/:postId", isOwner, async (req, res) => {
 
   const post = await prisma.post.findUnique({
     where: { id: postId },
-    include: { keywords: true },
+    include: { keywords: true, attempts: true },
   });
 
   if (!post) {
@@ -169,6 +170,56 @@ router.delete("/:postId", isOwner, async (req, res) => {
 
   res.json({
     message: "Post deleted successfully",
-    post: formatPost(post),
+    post: formatPost(post, req.user.userId),
   });
 });
+
+// POST /api/posts/:postId/play
+router.post("/:postId/play", async (req, res) => {
+  const postId = Number(req.params.postId);
+  const { answer } = req.body;
+
+  if (!answer) {
+    return res.status(400).json({ msg: "answer is required" });
+  }
+
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+  });
+
+  if (!post) {
+    return res.status(404).json({ message: "Post not found" });
+  }
+
+  const correct =
+    post.content.trim().toLowerCase() === answer.trim().toLowerCase();
+
+  const attempt = await prisma.attempt.create({
+    data: {
+      answer,
+      correct,
+      userId: req.user.userId,
+      postId,
+    },
+  });
+
+  res.status(201).json({
+    id: attempt.id,
+    correct,
+    submittedAnswer: answer,
+    correctAnswer: correct ? answer : post.content,
+    createdAt: attempt.createdAt
+      .toISOString()
+      .replace("T", " ")
+      .slice(0, 16),
+  });
+});
+
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err.message === "Only image files are allowed") {
+    return res.status(400).json({ msg: err.message });
+  }
+  next(err);
+});
+
+module.exports = router;
