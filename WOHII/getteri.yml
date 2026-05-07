@@ -1,0 +1,28 @@
+info:
+  name: getteri
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: http://localhost:3000/api/posts?limit=2&page=2
+  params:
+    - name: limit
+      value: "2"
+      type: query
+    - name: page
+      value: "2"
+      type: query
+  body:
+    type: json
+    data: ""
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTc3ODE2MDAzNSwiZXhwIjoxNzc4MTYzNjM1fQ.aX4vlkEr_3_K77SvlIaR27m8bBaDDVnL0LVxPl5wv1g
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​

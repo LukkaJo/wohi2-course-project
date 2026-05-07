@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path'); // Lisätty path-moduuli polkujen käsittelyyn
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,7 +9,8 @@ const authRouter = require("./routes/auth");
 const prisma = require("./lib/prisma");
 
 
-// Middleware to parse JSON bodies (will be useful in later steps)
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 app.use(express.json());
 
 // everything under /api/posts
@@ -40,4 +42,3 @@ process.on("SIGTERM", async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
-

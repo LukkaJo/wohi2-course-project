@@ -3,38 +3,76 @@ const router = express.Router();
 const prisma = require("../lib/prisma");
 const authenticate = require("../middleware/auth");
 const isOwner = require("../middleware/isOwner");
+const upload = require("../middleware/multer");
+const multer = require("multer");
 
 router.use(authenticate); 
+
+function parseKeywords(keywords) {
+  if (Array.isArray(keywords)) return keywords;
+  if (typeof keywords === "string") {
+    return keywords.split(",").map((k) => k.trim()).filter(Boolean);
+  }
+  return [];
+}
 
 function formatPost(post) {
   return {
     ...post,
     date: post.date.toISOString().split("T")[0],
     keywords: post.keywords.map((k) => k.name),
+    userName: post.user?.name || null, 
+    likeCount: post._count?.likes || 0,
+    isLiked: post.likes?.length > 0,
+    user: undefined,
+    likes: undefined,
+    _count: undefined,
   };
 }
 
 router.get("/", async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 5));
+  const skip = (page - 1) * limit;
+
   const { keyword } = req.query;
+  const where = keyword ? { keywords: { some: { name: keyword } } } : {};
 
-  const where = keyword
-    ? { keywords: { some: { name: keyword } } }
-    : {};
+  const [filteredPosts, total] = await Promise.all([ 
+    prisma.post.findMany({ 
+        where, 
+        include: { 
+          keywords: true, 
+          user: true,
+          likes: { where: { userId: req.user.userId }, take: 1 },
+          _count: { select: { likes: true } }
+        }, 
+        orderBy: { id: "asc" }, 
+        skip,
+        take: limit,
+    }), 
+    prisma.post.count({ where }),
+  ]);
 
-  const posts = await prisma.post.findMany({
-    where,
-    include: { keywords: true },
-    orderBy: { id: "asc" },
+  res.json({
+    data: filteredPosts.map(formatPost),
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
   });
-
-  res.json(posts.map(formatPost));
 });
 
 router.get("/:postId", async (req, res) => {
   const postId = Number(req.params.postId);
   const post = await prisma.post.findUnique({
     where: { id: postId },
-    include: { keywords: true },
+    include: { 
+      keywords: true, 
+      user: true,
+      likes: { where: { userId: req.user.userId }, take: 1 },
+      _count: { select: { likes: true } }
+    },
   });
 
   if (!post) {
@@ -44,20 +82,22 @@ router.get("/:postId", async (req, res) => {
   res.json(formatPost(post));
 });
 
-router.post("/", async (req, res) => {
+router.post("/", upload.single("image"), async (req, res) => {
   const { title, date, content, keywords } = req.body;
+  const imageUrl = req.file ? `/uploads/${req.file.filename}` : null; 
 
   if (!title || !date || !content) {
     return res.status(400).json({ msg: "title, date and content are mandatory" });
   }
 
-  const keywordsArray = Array.isArray(keywords) ? keywords : [];
+  const keywordsArray = parseKeywords(keywords);
 
   const newPost = await prisma.post.create({
     data: {
       title,
       date: new Date(date),
       content,
+      imageUrl,
       userId: req.user.userId,
       keywords: {
         connectOrCreate: keywordsArray.map((kw) => ({
@@ -72,7 +112,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(formatPost(newPost));
 });
 
-router.put("/:postId", isOwner, async (req, res) => {
+router.put("/:postId", isOwner, upload.single("image"), async (req, res) => {
   const postId = Number(req.params.postId);
   const { title, date, content, keywords } = req.body;
 
@@ -85,14 +125,21 @@ router.put("/:postId", isOwner, async (req, res) => {
     return res.status(400).json({ msg: "title, date and content are mandatory" });
   }
 
-  const keywordsArray = Array.isArray(keywords) ? keywords : [];
+  const data = {
+    title,
+    date: new Date(date),
+    content,
+  };
+
+  if (req.file) {
+    data.imageUrl = `/uploads/${req.file.filename}`; 
+  }
+
+  const keywordsArray = parseKeywords(keywords); 
   const updatedPost = await prisma.post.update({
     where: { id: postId },
     data: {
-      title,
-      date: new Date(date),
-      content,
-      userId: req.user.userId,
+      ...data,
       keywords: {
         set: [],
         connectOrCreate: keywordsArray.map((kw) => ({
@@ -106,7 +153,7 @@ router.put("/:postId", isOwner, async (req, res) => {
   res.json(formatPost(updatedPost));
 });
 
-router.delete("/:postId",isOwner, async (req, res) => {
+router.delete("/:postId", isOwner, async (req, res) => {
   const postId = Number(req.params.postId);
 
   const post = await prisma.post.findUnique({
@@ -125,5 +172,3 @@ router.delete("/:postId",isOwner, async (req, res) => {
     post: formatPost(post),
   });
 });
-
-module.exports = router;
