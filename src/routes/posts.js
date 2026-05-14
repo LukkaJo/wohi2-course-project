@@ -5,6 +5,14 @@ const authenticate = require("../middleware/auth");
 const isOwner = require("../middleware/isOwner");
 const upload = require("../middleware/multer");
 const multer = require("multer");
+const { ValidationError, NotFoundError } = require("../lib/errors");
+const { z } = require("zod");
+
+const PostInput = z.object({
+  question: z.string().min(1),
+  answer: z.string().min(1),
+  keywords: z.union([z.string(), z.array(z.string())]).optional(),
+});
 
 router.use(authenticate); 
 
@@ -17,12 +25,11 @@ function parseKeywords(keywords) {
   return [];
 }
 
-// currentUserId parametri tarvitaan "solved"-kenttää varten
 function formatPost(post, currentUserId = null) {
   return {
     ...post,
-    question: post.title,       // frontti käyttää q.question
-    answer: post.content,       // frontti käyttää q.answer
+    question: post.title,
+    answer: post.content,
     date: post.date.toISOString().split("T")[0],
     keywords: post.keywords.map((k) => k.name),
     userName: post.user?.name || null,
@@ -47,7 +54,7 @@ router.get("/", async (req, res) => {
         include: { 
           keywords: true, 
           user: true,
-          attempts: true,       // tarvitaan solved-kenttää varten
+          attempts: true,
         }, 
         orderBy: { id: "asc" }, 
         skip,
@@ -72,32 +79,37 @@ router.get("/:postId", async (req, res) => {
     include: { 
       keywords: true, 
       user: true,
-      attempts: true,           // tarvitaan solved-kenttää varten
+      attempts: true,
     },
   });
 
   if (!post) {
-    return res.status(404).json({ message: "Post not found" });
+    req.log.warn({ postId }, "user tried to access nonexistent post");
+    throw new NotFoundError("Post not found");
   }
 
   res.json(formatPost(post, req.user.userId));
 });
 
-router.post("/", upload.single("image"), async (req, res) => {
-  const {question, answer, keywords} = req.body;
-  const imageUrl = req.file ? `/uploads/${req.file.filename}` : null; 
-
-  if (!question || !answer) {
-    return res.status(400).json({ msg: "title, date and content are mandatory" });
-  }
-
-  const keywordsArray = parseKeywords(keywords);
+router.post("/", (req, res, next) => {
+  upload.single("image")(req, res, (err) => {
+    if (err instanceof multer.MulterError || 
+        (err && err.message === "Only image files are allowed")) {
+      return res.status(400).json({ msg: err.message });
+    }
+    if (err) return next(err);
+    next();
+  });
+}, async (req, res) => {
+  const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  const data = PostInput.parse(req.body);
+  const keywordsArray = parseKeywords(data.keywords);
 
   const newPost = await prisma.post.create({
     data: {
-      title: question,
+      title: data.question,
       date: new Date(),
-      content: answer,
+      content: data.answer,
       imageUrl,
       userId: req.user.userId,
       keywords: {
@@ -119,11 +131,11 @@ router.put("/:postId", isOwner, upload.single("image"), async (req, res) => {
 
   const existingPost = await prisma.post.findUnique({ where: { id: postId } });
   if (!existingPost) {
-    return res.status(404).json({ message: "Post not found" });
+    throw new NotFoundError("Post not found");
   }
 
   if (!title || !date || !content) {
-    return res.status(400).json({ msg: "title, date and content are mandatory" });
+    throw new ValidationError("title, date and content are mandatory");
   }
 
   const data = {
@@ -163,7 +175,7 @@ router.delete("/:postId", isOwner, async (req, res) => {
   });
 
   if (!post) {
-    return res.status(404).json({ message: "Post not found" });
+    throw new NotFoundError("Post not found");
   }
 
   await prisma.post.delete({ where: { id: postId } });
@@ -174,13 +186,12 @@ router.delete("/:postId", isOwner, async (req, res) => {
   });
 });
 
-// POST /api/posts/:postId/play
 router.post("/:postId/play", async (req, res) => {
   const postId = Number(req.params.postId);
   const { answer } = req.body;
 
   if (!answer) {
-    return res.status(400).json({ msg: "answer is required" });
+    throw new ValidationError("answer is required");
   }
 
   const post = await prisma.post.findUnique({
@@ -188,7 +199,7 @@ router.post("/:postId/play", async (req, res) => {
   });
 
   if (!post) {
-    return res.status(404).json({ message: "Post not found" });
+    throw new NotFoundError("Post not found");
   }
 
   const correct =
